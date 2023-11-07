@@ -293,9 +293,9 @@ class Board:
                 W_has_move = False
 
         if W_has_move and not B_has_move:
-            return 2
-        elif not W_has_move and B_has_move:
             return 1
+        elif not W_has_move and B_has_move:
+            return 2
 
         W = True
         B = True
