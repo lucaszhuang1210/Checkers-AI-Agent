@@ -94,7 +94,7 @@ class Board:
         """
         Makes Move on the board
         @param move: Move object provided by the StudentAI, Uses this parameter to make the move on the board
-        @param turn: this parameter tracks the current turn. either player 1 (white) or player 2(black)
+        @param turn: this parameter tracks the current turn. either player 1 (black) or player 2 (white)
         @return:
         @raise InvalidMoveError: raises this objection if the move provided isn't valid on the current board
         """
@@ -150,12 +150,16 @@ class Board:
                         temp_saved_move[2] = True
                     self.board[target[0]][target[1]].become_king()
                     #self.saved_move[2] = True
+                    if not is_start_checker_king:
+                        break
 
                 elif (turn == 'W' and target[0] == 0):# and not self.board[target[0]][target[1]].is_king):
                     if not is_start_checker_king:
                         temp_saved_move[2] = True
                     self.board[target[0]][target[1]].become_king()
                      #self.saved_move[2] = True
+                    if not is_start_checker_king:
+                        break
                 else:
                     temp_saved_move[2] = False #self.saved_move[2] = False
 
@@ -293,9 +297,9 @@ class Board:
                 W_has_move = False
 
         if W_has_move and not B_has_move:
-            return 1
-        elif not W_has_move and B_has_move:
             return 2
+        elif not W_has_move and B_has_move:
+            return 1
 
         W = True
         B = True
@@ -408,7 +412,6 @@ class Board:
                     self.white_count += 1
                 elif self.board[i][j].color == "B":
                     self.black_count += 1
-
 
 
 
