@@ -1,1 +1,16 @@
+# Ignore macOS system files
 .DS_Store
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+
+# Ignore virtual environments
+venv/
+env/
+*.venv/
+
+# Ignore IDE/editor settings
+.vscode/
+.idea/
+*.sublime-workspace
