@@ -21,11 +21,12 @@ class StudentAI():
 
     def get_move(self, move):
         # If an opponent move is provided, update our board accordingly.
-        if len(move) != 0:
-            self.board.make_move(move, self.opponent[self.color])
-        else:
-            # No move provided means we are the first player.
+        if hasattr(move, 'col') and hasattr(move, 'row') and move.col == -1 and move.row == -1:
+            # We're the first player.
             self.color = 1
+        else:
+            # Otherwise, update our board with the opponent's move.
+            self.board.make_move(move, self.opponent[self.color])
 
         # Retrieve all possible moves for our color.
         movesets = self.board.get_all_possible_moves(self.color)
