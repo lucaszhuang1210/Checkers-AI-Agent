@@ -1,281 +1,288 @@
-from random import randint
-from BoardClasses import Move
-from BoardClasses import Board
-#The following part should be completed by students.
-#Students can modify anything except the class name and exisiting functions and varibles.
-
+import random
+import math
 import copy
 import sys
-import random
+from BoardClasses import Board, Move
 
 class MCTSNode:
     def __init__(self, board, parent=None, last_move=None, color_to_move=1):
+        """
+        MCTS tree node.
+        - board: Current Board state
+        - parent: Parent node in the search tree
+        - children: Dict[move -> MCTSNode]
+        - visits: Number of times this node was visited
+        - wins: Summed result (e.g., +1 for wins, -1 for losses)
+        - untried_moves: List of legal moves not yet expanded at this node
+        - color_to_move: Which player's move it is in this node's state
+        - last_move: The move that led from the parent to this node
+        """
         self.board = board
         self.parent = parent
-        self.children = {}  # move -> MCTSNode
+        self.children = {}
         self.visits = 0
         self.wins = 0
         self.untried_moves = []
         self.color_to_move = color_to_move
         self.last_move = last_move
 
-    def is_fully_expanded(self):
-        return len(self.untried_moves) == 0
-
     def is_terminal_node(self):
-        """Check if the game is finished at this node (win/lose/draw)."""
-        # We can see if there's a winner for either color; 
-        # if is_win(...) returns non-zero, the game is over.
+        """
+        Check if the game is over at this node (win or no moves left).
+        """
         if self.board.is_win(1) != 0 or self.board.is_win(2) != 0:
             return True
-        # Also, if no moves exist, it's effectively terminal for the current color
-        movesets = self.board.get_all_possible_moves(self.color_to_move)
-        return (len(movesets) == 0)
+        possible_moves = self.board.get_all_possible_moves(self.color_to_move)
+        return (len(possible_moves) == 0)
+
+    def is_fully_expanded(self):
+        """
+        A node is 'fully expanded' if all possible child moves have been explored.
+        """
+        return len(self.untried_moves) == 0
 
     def q(self):
-        """Return the average payoff = wins / visits (from AI perspective)."""
+        """
+        Average result from this node's perspective (wins / visits).
+        If visits=0, return 0 to avoid division by zero.
+        """
         if self.visits == 0:
             return 0
         return float(self.wins) / float(self.visits)
 
     def ucb1(self, exploration_constant):
         """
-        Return the UCB1 score:
-          Q + c * sqrt( ln(parent.visits) / visits ).
+        Upper Confidence Bound for Trees (UCT/ UCB1).
         """
         if self.visits == 0:
-            return float('inf')  # Encourage expansion of unvisited nodes
-        return self.q() + exploration_constant * (
-            (2 * (self.parent.visits))**0.5 / float(self.visits)
+            return float('inf')  # Encourage exploring unvisited nodes
+        return self.q() + exploration_constant * math.sqrt(
+            math.log(self.parent.visits) / float(self.visits)
         )
 
 
-class StudentAI():
+class StudentAI:
     def __init__(self, col, row, p):
         """
-        Initialize your AI with MCTS parameters. 
-        'col', 'row', 'p' refer to the board dimensions and piece arrangement,
-        just like in previous AIs.
+        An AI that uses Monte Carlo Tree Search (MCTS) for decision-making,
+        combined with a more advanced heuristic evaluation in rollouts.
+        
+        - Player 1 = Black, on top rows, moves downward
+        - Player 2 = White, on bottom rows, moves upward
         """
-        print("DEBUG: StudentAI using Monte Carlo Tree Search.", file=sys.stderr)
+        print("DEBUG: StudentAI with MCTS + improved heuristic", file=sys.stderr)
         self.col = col
         self.row = row
         self.p = p
-
         self.board = Board(col, row, p)
         self.board.initialize_game()
 
-        # By default, we'll assume we are color=2; if we see an empty move, we are color=1.
-        self.color = 2
+        # We don't know if we're player 1 (Black) or player 2 (White) until the first turn.
+        # We'll detect it in get_move via whether move is empty or not.
+        self.first_turn = True
+        self.color = None  # Will set this properly on the first turn
         self.opponent = {1: 2, 2: 1}
 
-        # MCTS parameters
-        self.num_simulations = 500    # The number of MCTS iterations per move. Increase if you have time
-        self.exploration_param = 1.41 # Exploration constant 'c' in UCB1
-        self.max_rollout_depth = 200  # Limit random rollout length (to avoid huge searching)
+        # MCTS Parameters
+        self.num_simulations = 600
+        self.exploration_param = math.sqrt(2)
+        self.max_rollout_depth = 50
 
     def get_move(self, move):
         """
-        Called each turn by the game engine:
-          - 'move' is the opponent's last move (or an empty Move if we move first).
-          - Return a Move object as our chosen action.
+        The main function called each turn. Returns our chosen Move.
+        
+        If move == [], it means we are the first player to move.
+        Otherwise, 'move' is the move the opponent just made.
         """
-        # If the opponent just moved, apply it to our board.
-        if len(move) != 0: 
-            self.board.make_move(move, self.opponent[self.color])
-        else:
-            # If there's no opponent move, we move first => color=1
-            self.color = 1
+        # If this is our first time here, determine which color we are.
+        if self.first_turn:
+            self.first_turn = False
+            if len(move) == 0:
+                # We are the first player => Black = 1
+                self.color = 1
+            else:
+                # We are the second player => White = 2
+                self.color = 2
 
-        # Check all possible moves. If none, return empty Move.
+        # Apply the opponent's move if it's not empty
+        if len(move) != 0:
+            self.board.make_move(move, self.opponent[self.color])
+
+        # Get all moves we can make now.
         movesets = self.board.get_all_possible_moves(self.color)
         if not movesets:
+            # No moves available => must return an empty move => we lose
             return Move([])
 
-        # Build a root node for MCTS from the current board state.
-        root = MCTSNode(board=copy.deepcopy(self.board),
+        # Build the root node for MCTS
+        root = MCTSNode(copy.deepcopy(self.board),
                         parent=None,
                         last_move=None,
                         color_to_move=self.color)
-
-        # Initialize untried moves for the root
         root.untried_moves = self._get_all_moves(root.board, root.color_to_move)
 
-        # Run MCTS for a fixed number of iterations
+        # Perform MCTS simulations
         for _ in range(self.num_simulations):
-            # 1. Selection
             node = self._select(root)
-
-            # 2. Expansion
-            if (not node.is_terminal_node()) and (len(node.untried_moves) > 0):
+            if (not node.is_terminal_node()) and node.untried_moves:
                 node = self._expand(node)
-
-            # 3. Simulation (rollout)
             result = self._simulate(node)
-
-            # 4. Backpropagation
             self._backpropagate(node, result)
 
-        # After simulations, pick the move (child of root) with the highest visit count (or best average Q).
-        best_child = self._best_child(root, 0)  # set exploration = 0 for final choice
-        best_move = best_child.last_move  # The move that led to that child
+        # Best child (exploration=0 => purely exploit best Q value)
+        best_child = self._best_child(root, exploration=0)
+        best_move = best_child.last_move
 
-        # Execute the best move on our real board
+        # Make that move on our real board
         self.board.make_move(best_move, self.color)
         return best_move
 
-    # -------------------------------------------------------------------------
-    # MCTS Core Functions
-    # -------------------------------------------------------------------------
     def _select(self, node):
-        """ 
-        Selection: descend down the tree while the current node is fully expanded
-        and not terminal, picking children via UCB1.
         """
-        while (not node.is_terminal_node()) and node.is_fully_expanded():
+        Descend through the tree until we find a node that either
+          - is terminal, or
+          - is not fully expanded.
+        """
+        while not node.is_terminal_node() and node.is_fully_expanded():
             node = self._best_child(node, self.exploration_param)
         return node
 
     def _expand(self, node):
-        """ 
-        Expansion: create a new child for one of the node's untried moves.
+        """
+        Take one untried move from 'node', create a new child node for it,
+        and return that child node.
         """
         move = node.untried_moves.pop()
         new_board = copy.deepcopy(node.board)
         new_board.make_move(move, node.color_to_move)
 
-        # Next color to move
         next_color = self.opponent[node.color_to_move]
-
-        child_node = MCTSNode(
-            board=new_board,
-            parent=node,
-            last_move=move,
-            color_to_move=next_color
-        )
-        # Prepare the child's untried moves
+        child_node = MCTSNode(new_board, node, move, next_color)
         child_node.untried_moves = self._get_all_moves(new_board, next_color)
-
         node.children[move] = child_node
         return child_node
 
     def _simulate(self, node):
         """
-        Simulation/Rollout: From this node’s state, play moves at random 
-        until we reach a terminal state or a max depth. 
-        Return +1 if our AI eventually wins, -1 if we lose, else 0 if draw.
-        
-        For simplicity, we interpret is_win(self.color) to see if we (color=self.color) 
-        are the winner in the final position. 
+        Simulate (rollout) from 'node' until we reach 'max_rollout_depth' or terminal.
+        Return +1 if we eventually see a win for 'self.color',
+               -1 if we see a loss for 'self.color',
+               or a heuristic evaluation if we reach the depth limit.
         """
         board_copy = copy.deepcopy(node.board)
         color_to_move = node.color_to_move
-        rollout_depth = 0
+        depth = 0
 
-        while True:
-            # Check for terminal
+        while depth < self.max_rollout_depth:
+            # Check if game ended:
             if board_copy.is_win(self.color) == self.color:
                 return +1.0
             elif board_copy.is_win(self.opponent[self.color]) == self.opponent[self.color]:
                 return -1.0
 
-            # If no moves, it's terminal from current player's perspective
             movesets = board_copy.get_all_possible_moves(color_to_move)
             if not movesets:
-                # If color_to_move can't move, check if that means the other color is the winner
-                # Typically in checkers, if you cannot move, you lose.
-                if color_to_move == self.color:
-                    return -1.0
-                else:
-                    return +1.0
+                # No moves => this side loses
+                return -1.0 if color_to_move == self.color else +1.0
 
-            # Stop if we exceed max depth (optional)
-            rollout_depth += 1
-            if rollout_depth > self.max_rollout_depth:
-                # Heuristic cutoff => Evaluate board instead
-                return self._heuristic_evaluation(board_copy)
+            depth += 1
+            # Randomly pick from all possible moves
+            all_moves = [m for group in movesets for m in group]
+            random_move = random.choice(all_moves)
 
-            # Otherwise pick a random move from all possible moves
-            move = self._select_random_move(movesets)
-            board_copy.make_move(move, color_to_move)
+            # Apply move
+            board_copy.make_move(random_move, color_to_move)
             color_to_move = self.opponent[color_to_move]
+
+        # If we exit the loop, we haven't reached a terminal state => use heuristic
+        return self._heuristic_evaluation(board_copy)
 
     def _backpropagate(self, node, result):
         """
-        Backpropagation: propagate the simulation result up the tree. 
-        'result' is +1 if we eventually won, -1 if we lost, 0 if draw, from *our* perspective.
+        Propagate the 'result' (e.g. +1 for win, -1 for loss) up the tree.
         """
         while node is not None:
             node.visits += 1
-            # If we are the AI color= self.color, 
-            # we add 'result' to node.wins if node's perspective is also self.color.
-            # However, a simpler approach is to always store results from the 
-            # perspective of self.color. So we just do:
             node.wins += result
             node = node.parent
 
     def _best_child(self, node, exploration):
         """
-        Return the child with the highest UCB1 score if exploration>0 
-        or the best average Q if exploration=0 (final move selection).
+        Choose the child with the highest UCB1 if exploration != 0,
+        or the highest average win rate (child.q()) if exploration=0.
         """
-        best = None
-        best_score = float('-inf')
-        for move, child in node.children.items():
-            if exploration > 0:
-                score = child.ucb1(exploration)
-            else:
-                # Final move selection => pick the highest average Q or highest visits
-                score = child.q()
+        if exploration == 0:
+            # Pure exploitation
+            return max(node.children.values(), key=lambda child: child.q())
+        else:
+            # UCB1 selection
+            return max(node.children.values(), key=lambda child: child.ucb1(exploration))
 
-            if score > best_score:
-                best_score = score
-                best = child
-        return best
-
-    # -------------------------------------------------------------------------
-    # Helper Functions
-    # -------------------------------------------------------------------------
     def _get_all_moves(self, board, color):
         """
-        Flatten all possible moves for 'color' from the board,
-        because many checkers engines return a list-of-lists.
+        Flatten the list of lists returned by board.get_all_possible_moves(color)
+        into a single list of Move objects.
         """
         movesets = board.get_all_possible_moves(color)
-        all_moves = []
-        for group in movesets:
-            for m in group:
-                all_moves.append(m)
-        return all_moves
-
-    def _select_random_move(self, movesets):
-        """Choose a random move from the list-of-lists structure of moves."""
-        all_moves = []
-        for group in movesets:
-            for m in group:
-                all_moves.append(m)
-        return random.choice(all_moves)
+        return [m for group in movesets for m in group]
 
     def _heuristic_evaluation(self, board):
         """
-        Quick evaluation function if we truncate the rollout.
-        Returns +1 if we look better, -1 if we look worse, 0 if roughly balanced.
-        """
-        # Simple: compare piece counts
-        # +1 if we are ahead, -1 if behind, 0 if equal
-        my_pieces = 0
-        opp_pieces = 0
-        for row in board.board:
-            for piece in row:
-                if piece is not None:
-                    if piece.get_color() == self.color:
-                        my_pieces += 1
-                    else:
-                        opp_pieces += 1
+        A more advanced evaluation function that considers:
+          1) Piece count and king value
+          2) Mobility (# of available moves)
+          3) Proximity to promotion row for non-king pieces
 
-        if my_pieces > opp_pieces:
-            return +1.0
-        elif my_pieces < opp_pieces:
-            return -1.0
-        else:
-            return 0.0
+        We assume:
+          - color=1 (Black) is top->down
+          - color=2 (White) is bottom->up
+        """
+        my_color = self.color
+        opp_color = self.opponent[my_color]
+
+        # 1) Piece/Kings scoring
+        REGULAR_PIECE_VALUE = 1
+        KING_VALUE = 3
+
+        my_piece_score = 0
+        opp_piece_score = 0
+
+        # 2) Mobility scoring
+        my_moves = board.get_all_possible_moves(my_color)
+        opp_moves = board.get_all_possible_moves(opp_color)
+        mobility_score = (len(my_moves) - len(opp_moves)) * 0.2
+
+        # 3) Proximity to promotion
+        PROXIMITY_BONUS = 0.1
+
+        for r in range(self.row):
+            for c in range(self.col):
+                piece = board.board[r][c]
+                if piece is not None:
+                    color = piece.get_color()
+                    value = KING_VALUE if piece.is_king else REGULAR_PIECE_VALUE
+
+                    if color == my_color:
+                        # Distances: Black=1 => (self.row-1 - r), White=2 => r
+                        if not piece.is_king:
+                            if color == 1:  # Black
+                                distance_to_promotion = (self.row - 1 - r)
+                            else:           # White
+                                distance_to_promotion = r
+                            rowBonus = (self.row - 1 - distance_to_promotion)
+                            value += PROXIMITY_BONUS * rowBonus
+                        my_piece_score += value
+                    else:
+                        # Opponent piece
+                        if not piece.is_king:
+                            if color == 1:  # Black
+                                distance_to_promotion = (self.row - 1 - r)
+                            else:           # White
+                                distance_to_promotion = r
+                            rowBonus = (self.row - 1 - distance_to_promotion)
+                            value += PROXIMITY_BONUS * rowBonus
+                        opp_piece_score += value
+
+        # Final score: piece difference + mobility
+        return (my_piece_score - opp_piece_score) + mobility_score
