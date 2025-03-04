@@ -25,8 +25,12 @@ The shell supports playing against other **local AI shells** written in differen
 
 #### **Local AI Match:**
 To play against another AI locally, run:
-`python3 AI_Runner.py {col} {row} {p} l {AI_1_path} {AI_2_path}`
+```
+python3 AI_Runner.py {col} {row} {p} l {AI_1_path} {AI_2_path}
+```
 
 #### **Network AI Match:**
 To play across the network, ensure you're connected through the **school VPN** (must be using school Wi-Fi). Then, navigate to `Tools/AI_Runner.py` and run:
-`python3 AI_Runner.py n {AI_path}`
+```
+python3 AI_Runner.py n {AI_path}
+```
