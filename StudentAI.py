@@ -4,6 +4,9 @@ import copy
 import sys
 from BoardClasses import Board, Move
 
+# Constants
+NUM_SIMULATIONS = 600
+MAX_ROLLOUT_DEPTH = 50
 
 class MCTSNode:
     def __init__(self, board, parent=None, last_move=None, color_to_move=1):
@@ -85,9 +88,10 @@ class StudentAI:
         self.opponent = {1: 2, 2: 1}
 
         # MCTS Parameters
-        self.num_simulations = 600
+        self.num_simulations = NUM_SIMULATIONS
+        self.max_rollout_depth = MAX_ROLLOUT_DEPTH
         self.exploration_param = math.sqrt(2)
-        self.max_rollout_depth = 50
+
 
     def get_move(self, move):
         """
