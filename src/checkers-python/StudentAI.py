@@ -1,344 +1,293 @@
-from random import randint
-from BoardClasses import Move
-from BoardClasses import Board
-#The following part should be completed by students.
-#Students can modify anything except the class name and exisiting functions and varibles.
-
 import copy
-import sys
+import time
 import random
+import math
+from BoardClasses import Move, Board
 
-NUM_SIMULATION = 1000
-MAX_ROLLOUT_DEPTH = 500
+TIME_LIMIT = 20                         # seconds per move
+MAX_ITERATION = 2000                    # Maximum iterations for MCTS
+EXPLORATION_PARAM = math.sqrt(2)
 
-class MCTSNode:
-    def __init__(self, board, parent=None, last_move=None, color_to_move=1):
-        self.board = board
-        self.parent = parent
-        self.children = {}  # move -> MCTSNode
-        self.visits = 0
-        self.wins = 0
-        self.untried_moves = []
-        self.color_to_move = color_to_move
-        self.last_move = last_move
-
-    def is_fully_expanded(self):
-        return len(self.untried_moves) == 0
-
-    def is_terminal_node(self):
-        """Check if the game is finished at this node (win/lose/draw)."""
-        # We can see if there's a winner for either color; 
-        # if is_win(...) returns non-zero, the game is over.
-        if self.board.is_win(1) != 0 or self.board.is_win(2) != 0:
-            return True
-        # Also, if no moves exist, it's effectively terminal for the current color
-        movesets = self.board.get_all_possible_moves(self.color_to_move)
-        return (len(movesets) == 0)
-
-    def q(self):
-        """Return the average payoff = wins / visits (from AI perspective)."""
-        if self.visits == 0:
-            return 0
-        return float(self.wins) / float(self.visits)
-
-    def ucb1(self, exploration_constant):
-        """
-        Return the UCB1 score:
-          Q + c * sqrt( ln(parent.visits) / visits ).
-        """
-        if self.visits == 0:
-            return float('inf')  # Encourage expansion of unvisited nodes
-        return self.q() + exploration_constant * (
-            (2 * (self.parent.visits))**0.5 / float(self.visits)
-        )
-
-
-class StudentAI():
+class StudentAI:
     def __init__(self, col, row, p):
-        """
-        Initialize your AI with MCTS parameters. 
-        'col', 'row', 'p' refer to the board dimensions and piece arrangement,
-        just like in previous AIs.
-        """
-        print("DEBUG: StudentAI using Monte Carlo Tree Search.", file=sys.stderr)
         self.col = col
         self.row = row
         self.p = p
-
         self.board = Board(col, row, p)
         self.board.initialize_game()
+        self.color = ''                 # Will be set on the first move
+        self.opponent = {'W': 'B', 'B': 'W'}
+        self.root = None                # The current MCTS tree root
+        self.time_limit = TIME_LIMIT 
+        self.max_iterations = MAX_ITERATION  
+        self.exploration_param = EXPLORATION_PARAM
 
-        # By default, we'll assume we are color=2; if we see an empty move, we are color=1.
-        self.color = 2
-        self.opponent = {1: 2, 2: 1}
+        # Piece values used during board evaluation
+        self.piece_values = {
+            'W': 1.0,
+            'B': 1.0,
+            'WK': 2.0,
+            'BK': 2.0
+        }
 
-        # MCTS parameters
-        self.num_simulations = NUM_SIMULATION    # The number of MCTS iterations per move. Increase if you have time
-        self.max_rollout_depth = MAX_ROLLOUT_DEPTH  # Limit random rollout length (to avoid huge searching)
+    class TreeNode:
+        def __init__(self, board_state, player, move=None, parent_node=None):
+            self.game_state = board_state   # Current board configuration
+            self.move = move                # Move that led to this node
+            self.parent = parent_node
+            self.children = []
+            self.visits = 0
+            self.wins = 0
+            self.player = player            # Which player is to move in this node
+            self.available_moves = self._init_moves()
 
-        self.exploration_param = 1.41 # Exploration constant 'c' in UCB1
+        def _init_moves(self):
+            # Get and flatten moves; prioritize capture moves
+            nested_moves = self.game_state.get_all_possible_moves(self.player)
+            flat_moves = [m for group in nested_moves for m in group]
+            capture_moves = [m for m in flat_moves if len(m.seq) > 2]
+            regular_moves = [m for m in flat_moves if len(m.seq) <= 2]
+            return capture_moves + regular_moves
 
-    def get_move(self, move):
-        """
-        Called each turn by the game engine:
-          - 'move' is the opponent's last move (or an empty Move if we move first).
-          - Return a Move object as our chosen action.
-        """
-        # If the opponent just moved, apply it to our board.
-        if len(move) != 0: 
-            self.board.make_move(move, self.opponent[self.color])
+    def get_move(self, opponent_move):
+        # On the very first call, set the player's color.
+        if not self.color:
+            self.color = 'B' if not opponent_move else 'W'
+
+        # Apply the opponent’s move (if any) to our board.
+        if opponent_move:
+            opp = self.opponent[self.color]
+            self.board.make_move(opponent_move, opp)
+
+        # Create a new search tree (root node) or update the existing one.
+        if not self.root or not self.root.children:
+            # Use a deepcopy of the board so simulations don’t affect the actual game.
+            self.root = self.TreeNode(copy.deepcopy(self.board), self.color)
         else:
-            # If there's no opponent move, we move first => color=1
-            self.color = 1
+            self._refresh_tree(opponent_move)
 
-        # Check all possible moves. If none, return empty Move.
-        movesets = self.board.get_all_possible_moves(self.color)
-        if not movesets:
-            return Move([])
+        # Run the MCTS algorithm to choose the best move.
+        best_node = self._run_mcts()
 
-        # Build a root node for MCTS from the current board state.
-        root = MCTSNode(board=copy.deepcopy(self.board),
-                        parent=None,
-                        last_move=None,
-                        color_to_move=self.color)
+        if best_node:
+            self.board.make_move(best_node.move, self.color)
+            self.root = best_node
+            return best_node.move
+        else:
+            # Fallback: if MCTS did not yield a move, select a random move.
+            fallback_moves = self.board.get_all_possible_moves(self.color)
+            if fallback_moves:
+                chosen = random.choice(random.choice(fallback_moves))
+                self.board.make_move(chosen, self.color)
+                self.root = self.TreeNode(copy.deepcopy(self.board), self.opponent[self.color])
+                return chosen
+            return Move([])  # No moves available
 
-        # Initialize untried moves for the root
-        root.untried_moves = self._get_all_moves(root.board, root.color_to_move)
+    def _refresh_tree(self, opp_move):
+        # Update the tree root based on the opponent’s move.
+        if opp_move:
+            for child in self.root.children:
+                if self._boards_equal(self.board, child.game_state):
+                    self.root = child
+                    self.root.parent = None  # Disconnect the parent link
+                    return
+        self.root = self.TreeNode(copy.deepcopy(self.board), self.color)
 
-        # Run MCTS for a fixed number of iterations
-        for _ in range(self.num_simulations):
-            # 1. Selection
-            node = self._select(root)
+    def _boards_equal(self, board_a, board_b):
+        if board_a.black_count != board_b.black_count or board_a.white_count != board_b.white_count:
+            return False
+        for r in range(board_a.row):
+            for c in range(board_a.col):
+                piece_a = board_a.board[r][c]
+                piece_b = board_b.board[r][c]
+                if piece_a.color != piece_b.color or piece_a.is_king != piece_b.is_king:
+                    return False
+        return True
 
-            # 2. Expansion
-            if (not node.is_terminal_node()) and (len(node.untried_moves) > 0):
-                node = self._expand(node)
+    def _run_mcts(self):
+        start_time = time.time()
+        iterations = 0
 
-            # 3. Simulation (rollout)
-            result = self._simulate(node)
+        # If there is only one possible move, choose it immediately.
+        if len(self.root.available_moves) == 1 and not self.root.children:
+            single_move = self.root.available_moves[0]
+            board_copy = copy.deepcopy(self.root.game_state)
+            board_copy.make_move(single_move, self.root.player)
+            child = self.TreeNode(board_copy, self.opponent[self.root.player], single_move, self.root)
+            self.root.children.append(child)
+            return child
 
-            # 4. Backpropagation
-            self._backpropagate(node, result)
+        while time.time() - start_time < self.time_limit and iterations < self.max_iterations:
+            leaf = self._traverse(self.root)
+            new_child = self._expand(leaf)
+            if new_child is None:
+                continue
+            result = self._simulate(new_child)
+            self._backpropagate(result, new_child)
+            iterations += 1
 
-        # After simulations, pick the move (child of root) with the highest visit count (or best average Q).
-        best_child = self._best_child(root, 0)  # set exploration = 0 for final choice
-        best_move = best_child.last_move  # The move that led to that child
+        return self._select_best_move()
 
-        # Execute the best move on our real board
-        self.board.make_move(best_move, self.color)
-        return best_move
+    def _traverse(self, node):
+        current = node
+        # Descend the tree until a node with untried moves is found.
+        while current.children and not current.available_moves:
+            current = self._choose_best_child(current)
+        return current
 
-    # -------------------------------------------------------------------------
-    # MCTS Core Functions
-    # -------------------------------------------------------------------------
-    def _select(self, node):
-        """ 
-        Selection: descend down the tree while the current node is fully expanded
-        and not terminal, picking children via UCB1.
-        """
-        while (not node.is_terminal_node()) and node.is_fully_expanded():
-            node = self._best_child(node, self.exploration_param)
-        return node
+    def _choose_best_child(self, node):
+        best_val = float('-inf')
+        best_children = []
+        for child in node.children:
+            uct = self._compute_uct(child, self.exploration_param)
+            if uct > best_val:
+                best_val = uct
+                best_children = [child]
+            elif uct == best_val:
+                best_children.append(child)
+        return random.choice(best_children)
+
+    def _compute_uct(self, node, exploration):
+        if node.visits == 0:
+            return float('inf')
+        exploit = node.wins / node.visits
+        explore = exploration * math.sqrt(math.log(node.parent.visits) / node.visits)
+        # Add a small random factor to help break ties.
+        return exploit + explore + random.uniform(0, 0.0001)
 
     def _expand(self, node):
-        """ 
-        Expansion: create a new child for one of the node's untried moves.
-        """
-        move = node.untried_moves.pop()
-        new_board = copy.deepcopy(node.board)
-        new_board.make_move(move, node.color_to_move)
-
-        # Next color to move
-        next_color = self.opponent[node.color_to_move]
-
-        child_node = MCTSNode(
-            board=new_board,
-            parent=node,
-            last_move=move,
-            color_to_move=next_color
-        )
-        # Prepare the child's untried moves
-        child_node.untried_moves = self._get_all_moves(new_board, next_color)
-
-        node.children[move] = child_node
+        if not node.available_moves:
+            return None
+        # Prioritize capture moves if available.
+        capture_options = [m for m in node.available_moves if len(m.seq) > 2]
+        if capture_options:
+            chosen_move = capture_options[0]
+            node.available_moves.remove(chosen_move)
+        else:
+            chosen_move = node.available_moves.pop(0)
+        new_state = copy.deepcopy(node.game_state)
+        new_state.make_move(chosen_move, node.player)
+        child_node = self.TreeNode(new_state, self.opponent[node.player], chosen_move, node)
+        node.children.append(child_node)
         return child_node
 
-    def _backpropagate(self, node, result):
-        """
-        Backpropagation: propagate the simulation result up the tree. 
-        'result' is +1 if we eventually won, -1 if we lost, 0 if draw, from *our* perspective.
-        """
-        while node is not None:
-            node.visits += 1
-            # If we are the AI color= self.color, 
-            # we add 'result' to node.wins if node's perspective is also self.color.
-            # However, a simpler approach is to always store results from the 
-            # perspective of self.color. So we just do:
-            node.wins += result
-            node = node.parent
-
-    def _best_child(self, node, exploration):
-        """
-        Return the child with the highest UCB1 score if exploration>0 
-        or the best average Q if exploration=0 (final move selection).
-        """
-        best = None
-        best_score = float('-inf')
-        for move, child in node.children.items():
-            if exploration > 0:
-                score = child.ucb1(exploration)
-            else:
-                # Final move selection => pick the highest average Q or highest visits
-                score = child.q()
-
-            if score > best_score:
-                best_score = score
-                best = child
-        return best
-
-    # -------------------------------------------------------------------------
-    # Helper Functions
-    # -------------------------------------------------------------------------
-    def _get_all_moves(self, board, color):
-        """
-        Flatten all possible moves for 'color' from the board,
-        because many checkers engines return a list-of-lists.
-        """
-        movesets = board.get_all_possible_moves(color)
-        all_moves = []
-        for group in movesets:
-            for m in group:
-                all_moves.append(m)
-        return all_moves
-
     def _simulate(self, node):
-        board_copy = copy.deepcopy(node.board)
-        color_to_move = node.color_to_move
-        rollout_depth = 0
+        sim_board = copy.deepcopy(node.game_state)
+        current_player = node.player
+        move_count = 0
+        max_moves = 100  # Prevent infinite playouts
 
-        while True:
-            # Provide the current board state and color to our move selector.
-            self.current_board = board_copy
-            self.current_color = color_to_move
-
-            # Check for terminal conditions
-            if board_copy.is_win(self.color) == self.color:
-                return +1.0
-            elif board_copy.is_win(self.opponent[self.color]) == self.opponent[self.color]:
-                return -1.0
-
-            movesets = board_copy.get_all_possible_moves(color_to_move)
-            if not movesets:
-                if color_to_move == self.color:
-                    return -1.0
+        while move_count < max_moves:
+            outcome = sim_board.is_win(current_player)
+            if outcome != 0:
+                # A tie is indicated by outcome == -1.
+                if outcome == -1:
+                    return 0.5
+                # Return win/loss from our AI’s perspective.
+                if (outcome == 1 and self.color == 'B') or (outcome == 2 and self.color == 'W'):
+                    return 1.0
                 else:
-                    return +1.0
+                    return 0.0
 
-            rollout_depth += 1
-            if rollout_depth > self.max_rollout_depth:
-                return self._heuristic_evaluation(board_copy)
+            possible = sim_board.get_all_possible_moves(current_player)
+            if not possible:
+                return 0.0 if current_player == self.color else 1.0
 
-            move = self._select_move(movesets)
-            board_copy.make_move(move, color_to_move)
-            color_to_move = self.opponent[color_to_move]
+            all_moves = [m for group in possible for m in group]
+            capture_moves = [m for m in all_moves if len(m.seq) > 2]
+            if capture_moves:
+                chosen = max(capture_moves, key=lambda m: len(m.seq))
+            else:
+                chosen = self._choose_simulation_move(sim_board, all_moves, current_player)
+            sim_board.make_move(chosen, current_player)
+            current_player = self.opponent[current_player]
+            move_count += 1
 
-    def _select_move(self, movesets):
-        """
-        Choose a move from the provided movesets with the following priorities:
-          1. Prefer moves that do not allow the opponent to have a capturing move.
-          2. Among moves, favor those that are capturing moves,
-             especially if the move results in promotion to a king.
-          3. If no “safe” moves exist, fall back to one of the capturing moves;
-             otherwise, pick a random move.
-        """
-        # Flatten the list-of-lists movesets into one list of candidate moves.
-        candidate_moves = []
-        for group in movesets:
-            for m in group:
-                candidate_moves.append(m)
+        return self._evaluate_board(sim_board)
 
-        # Helper to decide if a move is a capturing move.
-        def is_capture(move):
-            if len(move) < 2:
-                return False
-            # In many checkers games, a capture move "jumps" over an opponent piece.
-            # We assume that a jump will change the row by at least 2.
-            return abs(move[1][0] - move[0][0]) >= 2
+    def _choose_simulation_move(self, board, moves, player):
+        scored_moves = []
+        for m in moves:
+            score = 0
+            start_row = m.seq[0][0]
+            end_row = m.seq[-1][0]
+            if player == 'W' and end_row < start_row:
+                score += (start_row - end_row) / board.row
+                if end_row == 0:
+                    score += 0.5
+            elif player == 'B' and end_row > start_row:
+                score += (end_row - start_row) / board.row
+                if end_row == board.row - 1:
+                    score += 0.5
+            score += self._check_safety(board, m, player)
+            score += random.uniform(0, 0.1)
+            scored_moves.append((m, score))
+        best_move = max(scored_moves, key=lambda tup: tup[1])[0]
+        return best_move
 
-        # Helper to decide if a move promotes a piece to king.
-        def is_promotion(move, color):
-            # Assume move is a list of positions (tuples), where the last is the destination.
-            dest = move[-1]
-            # For color 1, reaching the top row (row index 0) might grant a king.
-            if color == 1 and dest[0] == 0:
-                return True
-            # For color 2, reaching the bottom row (row index self.row-1) might grant a king.
-            if color == 2 and dest[0] == (self.row - 1):
-                return True
-            return False
+    def _check_safety(self, board, move, player):
+        end_pos = move.seq[-1]
+        opponent = self.opponent[player]
+        safety = 0
+        directions = [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+        for dr, dc in directions:
+            r1, c1 = end_pos[0] + dr, end_pos[1] + dc
+            r2, c2 = end_pos[0] - dr, end_pos[1] - dc
+            if board.is_in_board(r1, c1) and board.is_in_board(r2, c2):
+                if board.board[r1][c1].color == opponent and board.board[r2][c2].color == '.':
+                    safety -= 0.3
+        if end_pos[0] == 0 or end_pos[0] == board.row - 1:
+            safety += 0.2
+        if end_pos[1] == 0 or end_pos[1] == board.col - 1:
+            safety += 0.2
+        return safety
 
-        safe_moves = []
-        capturing_moves = []
-        # Evaluate each candidate move.
-        for move in candidate_moves:
-            # Create a temporary board from the current simulation board.
-            temp_board = copy.deepcopy(self.current_board)
-            temp_board.make_move(move, self.current_color)
+    def _evaluate_board(self, board):
+        white_score = 0
+        black_score = 0
+        for r in range(board.row):
+            for c in range(board.col):
+                piece = board.board[r][c]
+                if piece.color == 'W':
+                    bonus = (board.row - r) / board.row
+                    white_score += self.piece_values['WK' if piece.is_king else 'W'] + bonus * 0.2
+                elif piece.color == 'B':
+                    bonus = r / board.row
+                    black_score += self.piece_values['BK' if piece.is_king else 'B'] + bonus * 0.2
+        total = white_score + black_score
+        if total == 0:
+            return 0.5
+        return white_score / total if self.color == 'W' else black_score / total
 
-            # Check if this move leaves an opening for the opponent to capture.
-            opponent_moves = temp_board.get_all_possible_moves(self.opponent[self.current_color])
-            move_allows_capture = False
-            for group in opponent_moves:
-                for opp_move in group:
-                    if is_capture(opp_move):
-                        move_allows_capture = True
-                        break
-                if move_allows_capture:
-                    break
+    def _backpropagate(self, result, node):
+        current = node
+        while current:
+            current.visits += 1
+            if (current.player == self.color and current.parent) or \
+               (current.player == self.opponent[self.color] and not current.parent):
+                current.wins += result
+            else:
+                current.wins += (1 - result)
+            current = current.parent
 
-            if not move_allows_capture:
-                safe_moves.append(move)
+    def _select_best_move(self):
+        if not self.root.children:
+            return None
 
-            # Also, record capturing moves with a bonus if they result in promotion.
-            if is_capture(move):
-                bonus = 1
-                if is_promotion(move, self.current_color):
-                    bonus = 2
-                capturing_moves.append((move, bonus))
+        # Check if any child node represents an immediate win.
+        win_vals = [1, -1] if self.color == 'B' else [2, -1]
+        for child in self.root.children:
+            if child.game_state.is_win(self.opponent[self.color]) in win_vals:
+                return child
 
-        # Selection logic: prefer safe moves.
-        if safe_moves:
-            return random.choice(safe_moves)
-        # Otherwise, if we have capturing moves, choose one with the highest bonus.
-        elif capturing_moves:
-            max_bonus = max(bonus for _, bonus in capturing_moves)
-            best_moves = [move for move, bonus in capturing_moves if bonus == max_bonus]
-            return random.choice(best_moves)
-        else:
-            # Fall back to any candidate move if no moves meet our criteria.
-            return random.choice(candidate_moves)
-
-
-    def _heuristic_evaluation(self, board):
-        """
-        Quick evaluation function if we truncate the rollout.
-        Returns +1 if we look better, -1 if we look worse, 0 if roughly balanced.
-        """
-        # Simple: compare piece counts
-        # +1 if we are ahead, -1 if behind, 0 if equal
-        my_pieces = 0
-        opp_pieces = 0
-        for row in board.board:
-            for piece in row:
-                if piece is not None:
-                    if piece.get_color() == self.color:
-                        my_pieces += 1
-                    else:
-                        opp_pieces += 1
-
-        if my_pieces > opp_pieces:
-            return +1.0
-        elif my_pieces < opp_pieces:
-            return -1.0
-        else:
-            return 0.0
+        max_visits = -1
+        best_nodes = []
+        for child in self.root.children:
+            if child.visits > max_visits:
+                max_visits = child.visits
+                best_nodes = [child]
+            elif child.visits == max_visits:
+                best_nodes.append(child)
+        if len(best_nodes) > 1:
+            return max(best_nodes, key=lambda n: n.wins / n.visits)
+        return best_nodes[0]
