@@ -5,7 +5,7 @@ import math
 from BoardClasses import Move, Board
 
 TIME_LIMIT = 20                         # seconds per move
-MAX_ITERATION = 2000                    # Maximum iterations for MCTS
+MAX_ITERATION = 3000                    # Maximum iterations for MCTS
 EXPLORATION_PARAM = math.sqrt(2)
 
 class StudentAI:
