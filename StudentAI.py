@@ -15,7 +15,7 @@ import time
 def get_opponent_color(color):
     return 2 if color == 1 else 1
 
-def generate_random_move(board, color):
+def generate_random_move(board, color) -> Move:
     """
     Given a board state and color, returns a random move.
     """
@@ -97,10 +97,7 @@ class MCTS():
         if None not in node.children.values():
             return self.selection(max(node.children.values(), key=attrgetter('ucb_value')))
 
-        for move, child in node.children.items():
-            if child is None:
-                node.children[move] = MCTSNode(node.board, get_opponent_color(node.color), move, node)
-                return self.expand(node)
+        return self.expand(node)
 
     def expand(self, node):
         """
@@ -108,7 +105,7 @@ class MCTS():
         """
         for move, child in node.children.items():
             if child is None:
-                node.children[move] = MCTSNode(node.board, get_opponent_color(node.color), move, node)
+                node.children[move] = MCTSNode(node.board, get_opponent_color(node.color_to_move), move, node)
                 return node.children[move]
 
     def simulate(self, node):
@@ -116,7 +113,7 @@ class MCTS():
         Simulates a random game from the given node and returns the outcome.
         """
         temp_board = deepcopy(node.board)
-        temp_color = node.color
+        temp_color = node.color_to_move
         win_flag = temp_board.is_win(get_opponent_color(temp_color))
 
         while not win_flag:
@@ -124,14 +121,14 @@ class MCTS():
             win_flag = temp_board.is_win(temp_color)
             temp_color = get_opponent_color(temp_color)
 
-        if win_flag == get_opponent_color(node.color):
+        if win_flag == get_opponent_color(node.color_to_move):
             return 1  # Win for parent
-        elif win_flag == node.color:
+        elif win_flag == node.color_to_move:
             return -1  # Loss for parent
         return 0  # Draw
 
     def best_move(self):
-        sorted_moves = sorted(self.root.children.items(), key=lambda x: x[1].visit_count, reverse=True)
+        sorted_moves = sorted(self.root.children.items(), key=lambda x: x[1].visits, reverse=True)
         return sorted_moves[0][0]
 
 class StudentAI:
@@ -140,59 +137,62 @@ class StudentAI:
         self.col = col
         self.row = row
         self.p = p
-
         self.board = Board(col, row, p)
         self.board.initialize_game()
-
         self.color = 2
-        self.opponent = {1: 2, 2: 1}
 
-        self.max_rollout_depth = MAX_ROLLOUT_DEPTH
-        self.exploration_param = 1.41
+        self.total_time_remaining = 480 - 10
+        self.time_divisor = 0.5 * row * col
+        self.timed_move_count = 2
+
+        self.mcts = MCTS(MCTSNode(self.board, self.color, None, None))
 
     def get_move(self, move):
-        # If opponent made a move, update our board.
+        start_time = time.time()
+
+        # If opponent made a move, process it. Otherwise, set up first move.
         if move:
-            self.board.make_move(move, self.opponent[self.color])
+            self.place_move(move, get_opponent_color(self.color))
         else:
-            # No move implies we are starting the game.
-            self.color = 1
+            return self.handle_first_move()
 
-        # Get all possible moves for our current board.
-        movesets = self.board.get_all_possible_moves(self.color)
-        if not movesets:
-            return Move([])  # No moves available
+        # If only one move is possible, return it immediately.
+        moves = self.board.get_all_possible_moves(self.color)
+        if len(moves) == 1 and len(moves[0]) == 1:
+            return self.place_move(moves[0][0], self.color)
 
-        # Create a root node representing the current board state.
-        root = MCTSNode(
-            board=copy.deepcopy(self.board),
-            parent=None,
-            last_move=None,
-            color_to_move=self.color
-        )
-        # Initialize untried moves at the root.
-        root.untried_moves = self._get_all_moves(root.board, root.color_to_move)
+        # Perform MCTS search and select the best move
+        move_chosen = self.mcts.search(self.total_time_remaining / self.time_divisor)
+        self.place_move(move_chosen, self.color)
 
-        # Create an MCTS instance with the current root.
-        # Here we use a time-based search (e.g., 1.0 second) to run the simulations.
-        mcts = MCTS(root, self.color, self.opponent,
-                    exploration_param=self.exploration_param,
-                    max_rollout_depth=self.max_rollout_depth)
-        best_move = mcts.search(time_limit=1.0)
+        # Update time management
+        self.update_time_management(start_time)
+        return move_chosen
 
-        # Make the chosen move on our board.
-        self.board.make_move(best_move, self.color)
-        return best_move
+    def handle_first_move(self):
+        """ Handles the initialization logic for the first move of the game. """
+        self.color = 1
+        self.mcts.root = MCTSNode(self.board, self.color, None, None)
+        first_move = self.board.get_all_possible_moves(self.color)[0][1]
+        self.place_move(first_move, self.color)
+        return first_move
 
-    # Helper function to collect and shuffle all moves from available movesets.
-    def _get_all_moves(self, board, color):
-        movesets = board.get_all_possible_moves(color)
-        all_moves = [move for group in movesets for move in group]
-        random.shuffle(all_moves)
-        return all_moves
+    def place_move(self, move, color):
+        """ Updates board and tree root based on the chosen move. """
+        self.board.make_move(move, color)
 
-    # -------------------------------------------------------------------------
-    # MCTS Core Functions
-    # -------------------------------------------------------------------------
+        # Find the matching child node in the MCTS tree
+        child_node = self.mcts.root.children.get(move)
+        if child_node:
+            self.mcts.root = child_node
+            self.mcts.root.parent = None
+        else:
+            self.mcts.root = MCTSNode(self.board, get_opponent_color(color), None, None)
 
+        return move
 
+    def update_time_management(self, start_time):
+        """ Updates time tracking for MCTS iterations. """
+        self.total_time_remaining -= time.time() - start_time
+        self.time_divisor -= 0.5 - (1 / self.timed_move_count)
+        self.timed_move_count += 1
