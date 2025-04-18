@@ -8,7 +8,7 @@ cd Tools/
 ```
 ### Step 2: Run the AI
 ```
-python3 AI_Runner.py 7 7 2 l ../src/checkers-python/main.py ./Sample_AIs/Random_AI/main.py
+python3 AI_Runner.py 7 7 2 l ../main.py ./Sample_AIs/Random_AI/main.py
 ```
 
 ## Running Your AI
