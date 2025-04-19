@@ -19,17 +19,9 @@ Implemented a complete MCTS pipeline from scratch, with the following components
 
 This algorithmic design allowed the agent to make strategic decisions without hardcoded rules, generalizing across a wide range of game states.
 
-### Adaptive Time Management
-Developed a dynamic computation scheduler to optimize rollout counts per move:
-```python
-def update_time_management(self, start_time):
-    self.total_time_remaining -= time.time() - start_time
-    self.time_divisor -= 0.5 - (1 / self.timed_move_count)
-    self.timed_move_count += 1
-```
-- Early-game moves were given more time for deeper exploration.
-- Late-game moves executed faster with more refined search results.
-- Prevented timeouts while maintaining high search quality.
+### Adaptive Time Allocation
+
+To optimize decision-making, the AI dynamically adjusts how much time it spends per move based on game progression. Earlier moves receive more time for deeper exploration, while later moves are executed faster with increased search confidence.
 
 Below is a sample of the adaptive allocation strategy, assuming a maximum total runtime of **8 minutes (480 seconds)**:
 
@@ -40,6 +32,8 @@ Below is a sample of the adaptive allocation strategy, assuming a maximum total 
 | 3      | 441.62              | 24.3                |
 | 4      | 423.47              | 24.0                |
 | 5      | 405.80              | 23.8                |
+
+This allocation strategy ensures efficient use of available time while maintaining strong decision quality across all phases of the game.
 
 ### Performance and Memory Optimization
 - Reduced simulation overhead by avoiding unnecessary deep copies.
