@@ -1,6 +1,9 @@
 # Checkers AI Agent
 
-This project implements an AI agent that plays Checkers using the **Monte Carlo Tree Search (MCTS)** algorithm. The AI utilizes MCTS to simulate potential game outcomes and select optimal moves. The implementation follows the standard MCTS process: selection, expansion, simulation, and backpropagation. A UCB-based selection strategy ensures a balance between exploration and exploitation.
+An AI agent that plays Checkers using the **Monte Carlo Tree Search (MCTS)** algorithm. The AI utilizes MCTS to simulate potential game outcomes and select optimal moves. A UCB-based selection strategy ensures a balance between exploration and exploitation.
+
+**Performance:**  
+This AI consistently outperformed agents built with **basic logic**, **Minimax**, **Minimax with Alpha-Beta Pruning**, and **heuristic-based evaluation**. Its adaptive time allocation and simulation-based algorithm led to both higher win rates and more time-efficient gameplay.
 
 ## Authors
 
